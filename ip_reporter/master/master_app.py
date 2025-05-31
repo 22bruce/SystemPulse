@@ -41,8 +41,6 @@ def report_ip():
 
     hostname = data['hostname']
     ip_address = data['ip_address']
-    # Timestamp can be provided by client, or use server time if not.
-    # For consistency, we'll use server time upon receipt.
     current_time = datetime.datetime.now()
 
     try:
@@ -67,30 +65,82 @@ def index():
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute("SELECT hostname, ip_address, last_seen FROM known_clients ORDER BY last_seen DESC")
-        clients = cursor.fetchall()
+        clients_rows = cursor.fetchall() # Renamed to avoid confusion with template variable name
         conn.close()
     except sqlite3.Error as e:
         print(f"{datetime.datetime.now()} - Database error on index page: {e}")
         return "Error fetching client data from database.", 500
 
-    # Simple HTML template string
     html_template = """
     <!DOCTYPE html>
-    <html>
+    <html lang="en">
     <head>
-        <title>IP Reporter - Known Clients</title>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <meta http-equiv="refresh" content="60">
+        <title>IP Reporter - Monitored Systems</title>
         <style>
-            body { font-family: Arial, sans-serif; margin: 20px; }
-            h1 { color: #333; }
-            table { width: 80%; border-collapse: collapse; margin-top: 20px; }
-            th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
-            th { background-color: #f2f2f2; }
-            tr:nth-child(even) { background-color: #f9f9f9; }
+            body {
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
+                margin: 0;
+                padding: 20px;
+                background-color: #f4f7f6;
+                color: #333;
+                line-height: 1.6;
+            }
+            .container {
+                max-width: 900px;
+                margin: 20px auto;
+                padding: 20px;
+                background-color: #fff;
+                box-shadow: 0 0 15px rgba(0,0,0,0.1);
+                border-radius: 8px;
+            }
+            h1 {
+                color: #2c3e50;
+                text-align: center;
+                margin-bottom: 10px;
+            }
+            .last-updated {
+                text-align: center;
+                font-size: 0.9em;
+                color: #7f8c8d;
+                margin-bottom: 25px;
+            }
+            table {
+                width: 100%;
+                border-collapse: collapse;
+                margin-top: 20px;
+            }
+            th, td {
+                padding: 12px 15px;
+                border: 1px solid #ddd;
+                text-align: left;
+            }
+            th {
+                background-color: #3498db;
+                color: #ffffff;
+                font-weight: bold;
+            }
+            tr:nth-child(even) {
+                background-color: #f2f2f2;
+            }
+            tr:hover {
+                background-color: #e8f4f8;
+            }
+            .no-clients {
+                text-align: center;
+                font-style: italic;
+                color: #777;
+                padding: 20px;
+            }
         </style>
     </head>
     <body>
-        <h1>Known Client Systems</h1>
-        {% if clients %}
+        <div class="container">
+            <h1>Monitored Systems</h1>
+            <p class="last-updated">Last Updated: {{ now_utc }} UTC</p>
+            {% if clients %}
             <table>
                 <thead>
                     <tr>
@@ -104,46 +154,39 @@ def index():
                     <tr>
                         <td>{{ client['hostname'] }}</td>
                         <td>{{ client['ip_address'] }}</td>
-                        <td>{{ client['last_seen'].strftime('%Y-%m-%d %H:%M:%S') if client['last_seen'] is string else client['last_seen'] }}</td>
+                        <td>{{ client['last_seen'].strftime('%Y-%m-%d %H:%M:%S') if client['last_seen'].strftime else client['last_seen'] }}</td>
                     </tr>
                     {% endfor %}
                 </tbody>
             </table>
-        {% else %}
-            <p>No clients have reported yet.</p>
-        {% endif %}
-        <p><small>Page loaded at: {{ now_utc }} UTC</small></p>
+            {% else %}
+            <p class="no-clients">No client systems have reported yet.</p>
+            {% endif %}
+        </div>
     </body>
     </html>
     """
-    # Ensure last_seen is formatted correctly if it's already a string from DB (depends on sqlite3 version/config)
-    # Typically, SQLite stores TIMESTAMP as text, so strftime might not be needed if it's already text.
-    # However, if it's retrieved as a datetime object by sqlite3.Row, strftime is good.
-    # The template handles a string by just printing it.
 
-    # Convert datetime objects in clients if they are not strings
     processed_clients = []
-    for client_row in clients:
-        client_dict = dict(client_row) # Convert sqlite3.Row to dict
-        if isinstance(client_dict['last_seen'], datetime.datetime):
-            client_dict['last_seen'] = client_dict['last_seen'].strftime('%Y-%m-%d %H:%M:%S')
-        # If it's a string, assume it's already in 'YYYY-MM-DD HH:MM:SS.ffffff' format from DB
-        # and take only the part before microseconds for cleaner display.
-        elif isinstance(client_dict['last_seen'], str) and '.' in client_dict['last_seen']:
-             client_dict['last_seen'] = client_dict['last_seen'].split('.')[0]
+    for client_row in clients_rows: # Iterate over fetched rows
+        client_dict = dict(client_row)
+        last_seen_str = client_dict['last_seen']
+        try:
+            last_seen_dt = datetime.datetime.strptime(last_seen_str, '%Y-%m-%d %H:%M:%S.%f')
+        except ValueError:
+            try:
+                last_seen_dt = datetime.datetime.strptime(last_seen_str, '%Y-%m-%d %H:%M:%S')
+            except ValueError as e_parse:
+                print(f"{datetime.datetime.now()} - Error parsing timestamp '{last_seen_str}': {e_parse}")
+                last_seen_dt = last_seen_str
 
+        client_dict['last_seen'] = last_seen_dt
         processed_clients.append(client_dict)
-
 
     return render_template_string(html_template, clients=processed_clients, now_utc=datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'))
 
 if __name__ == '__main__':
-    # Ensure the script directory is the current working directory
-    # This helps when running from different locations, ensuring DATABASE path is correct.
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
-
-    init_db()  # Initialize the database and table on startup
+    init_db()
     print(f"{datetime.datetime.now()} - Starting Flask server on host 0.0.0.0, port 5000")
-    # When running Flask dev server directly, it's better not to use debug=True in "production" or shared dev.
-    # For this task, debug=True is fine as requested.
     app.run(host='0.0.0.0', port=5000, debug=True)
