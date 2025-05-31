@@ -26,8 +26,6 @@ Type=simple
 ExecStart=/usr/bin/python3 /opt/ip_reporter/client/client_app.py
 WorkingDirectory=/opt/ip_reporter/client/
 
-StandardOutput=syslog
-StandardError=syslog
 SyslogIdentifier=ip-reporter-client
 
 Restart=on-failure
