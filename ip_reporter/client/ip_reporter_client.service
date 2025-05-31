@@ -1,0 +1,37 @@
+[Unit]
+Description=IP Reporter Client Service
+After=network.target
+
+[Service]
+Type=simple
+# IMPORTANT: Adjust the User, Group, ExecStart, and WorkingDirectory paths
+# according to your deployment location and desired user.
+#
+# Example: If you place the ip_reporter directory in /opt/ip_reporter
+# and have a dedicated user 'ipreporter' to run the service:
+# User=ipreporter
+# Group=ipreporter
+# ExecStart=/usr/bin/python3 /opt/ip_reporter/client/client_app.py
+# WorkingDirectory=/opt/ip_reporter/client/
+#
+# For a simpler setup, running as root (ensure client_app.py is executable):
+# ExecStart=/usr/bin/python3 /opt/ip_reporter/client/client_app.py
+# WorkingDirectory=/opt/ip_reporter/client/
+#
+# Or if you install dependencies in a virtual environment:
+# ExecStart=/opt/ip_reporter/venv/bin/python3 /opt/ip_reporter/client/client_app.py
+
+# Using placeholder paths, assuming python3 is in /usr/bin/python3
+# and the application is in /opt/ip_reporter
+ExecStart=/usr/bin/python3 /opt/ip_reporter/client/client_app.py
+WorkingDirectory=/opt/ip_reporter/client/
+
+StandardOutput=syslog
+StandardError=syslog
+SyslogIdentifier=ip-reporter-client
+
+Restart=on-failure
+RestartSec=30
+
+[Install]
+WantedBy=multi-user.target
