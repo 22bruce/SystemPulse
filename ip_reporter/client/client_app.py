@@ -5,6 +5,17 @@ import configparser
 from datetime import datetime, timedelta
 import json
 import os
+import logging
+
+# Configure logging
+logger = logging.getLogger("ip_reporter_client")
+logger.setLevel(logging.INFO)
+# Create a handler (e.g., StreamHandler to output to console)
+# The systemd service file redirects stdout/stderr to syslog, so this will end up there.
+handler = logging.StreamHandler()
+formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s', '%Y-%m-%d %H:%M:%S')
+handler.setFormatter(formatter)
+logger.addHandler(handler)
 
 CONFIG_FILE = os.path.join(os.path.dirname(__file__), 'client_config.ini')
 
@@ -13,7 +24,7 @@ def get_hostname():
     try:
         return socket.gethostname()
     except socket.gaierror:
-        print(f"{datetime.now()} - Error: Could not determine hostname.")
+        logger.error("Could not determine hostname.")
         return None
 
 def get_ip_address():
@@ -22,16 +33,13 @@ def get_ip_address():
     Connects to an external server (Google DNS) to find the outbound IP.
     """
     try:
-        # Create a socket object
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.settimeout(2) # Timeout for the connection attempt
-        # Connect to an external server (doesn't actually send data)
+        s.settimeout(2)
         s.connect(("8.8.8.8", 53))
-        # Get the socket's own address
         ip_address = s.getsockname()[0]
         return ip_address
     except socket.error as e:
-        print(f"{datetime.now()} - Error: Could not determine IP address. Network may be down. Details: {e}")
+        logger.error(f"Could not determine IP address. Network may be down. Details: {e}")
         return None
     finally:
         if 's' in locals():
@@ -39,15 +47,17 @@ def get_ip_address():
 
 def load_config():
     """Reads client_config.ini and returns a config object."""
+    logger.info(f"Loading configuration from {CONFIG_FILE}")
     config = configparser.ConfigParser()
     if not os.path.exists(CONFIG_FILE):
-        print(f"{datetime.now()} - Error: Configuration file {CONFIG_FILE} not found.")
+        logger.error(f"Configuration file {CONFIG_FILE} not found.")
         return None
     try:
         config.read(CONFIG_FILE)
+        logger.info("Configuration loaded successfully.")
         return config
     except configparser.Error as e:
-        print(f"{datetime.now()} - Error reading configuration file: {e}")
+        logger.critical(f"Error reading configuration file: {e}")
         return None
 
 def send_data(config, hostname, ip_address):
@@ -56,50 +66,55 @@ def send_data(config, hostname, ip_address):
     Returns True on success, False otherwise.
     """
     if not config:
-        print(f"{datetime.now()} - Error: Configuration not loaded, cannot send data.")
+        logger.error("Configuration not loaded, cannot send data.")
         return False
 
     try:
         master_host = config.get('MasterServer', 'host')
-        master_port = config.getint('MasterServer', 'port') # Ensure port is an integer
+        master_port = config.getint('MasterServer', 'port')
     except (configparser.NoSectionError, configparser.NoOptionError) as e:
-        print(f"{datetime.now()} - Error: Missing master server configuration: {e}")
+        logger.error(f"Missing master server configuration: {e}")
         return False
 
     url = f"http://{master_host}:{master_port}/report_ip"
+    # Including client-side timestamp in payload for more accurate 'event time' if needed by server
     payload = {'hostname': hostname, 'ip_address': ip_address, 'timestamp': datetime.now().isoformat()}
 
-    print(f"{datetime.now()} - Attempting to report IP: {ip_address} for hostname: {hostname} to {url}")
+    logger.info(f"Attempting to report IP: {ip_address} for hostname: {hostname} to {url}")
     try:
         response = requests.post(url, json=payload, timeout=10)
         if 200 <= response.status_code < 300:
-            print(f"{datetime.now()} - Successfully reported. Server response: {response.text}")
+            # Assuming server sends back JSON, if it's plain text, response.text is better
+            try:
+                logger.info(f"Successfully reported. Server response: {response.json()}")
+            except requests.exceptions.JSONDecodeError:
+                logger.info(f"Successfully reported. Server response: {response.text}")
             return True
         else:
-            print(f"{datetime.now()} - Failed to report. Status code: {response.status_code}, Response: {response.text}")
+            logger.error(f"Failed to report. Status code: {response.status_code}, Response: {response.text}")
             return False
     except requests.exceptions.RequestException as e:
-        print(f"{datetime.now()} - Error sending data: {e}")
+        logger.error(f"Error sending data: {e}")
         return False
 
 if __name__ == '__main__':
+    logger.info("Starting IP Reporter Client...")
     config = load_config()
     if not config:
-        print(f"{datetime.now()} - Exiting due to configuration error.")
-        exit(1) # Use exit(1) to indicate an error exit
+        logger.critical("Exiting due to configuration error.")
+        exit(1)
 
     try:
         reporting_interval = config.getint('ClientSettings', 'reporting_interval_seconds')
         retry_interval = config.getint('ClientSettings', 'retry_interval_seconds')
         max_retry_duration = timedelta(seconds=config.getint('ClientSettings', 'max_retry_duration_seconds'))
+        logger.info(f"Settings: ReportingInterval={reporting_interval}s, RetryInterval={retry_interval}s, MaxRetryDuration={max_retry_duration.total_seconds()}s")
     except (configparser.NoSectionError, configparser.NoOptionError, ValueError) as e:
-        print(f"{datetime.now()} - Error: Invalid client settings in configuration: {e}")
-        # Fallback to default values if config is malformed
+        logger.error(f"Invalid client settings in configuration: {e}")
         reporting_interval = 1800
         retry_interval = 300
         max_retry_duration = timedelta(seconds=86400)
-        print(f"{datetime.now()} - Using default intervals: Report={reporting_interval}s, Retry={retry_interval}s, MaxRetryDuration={max_retry_duration.total_seconds()}s")
-
+        logger.warning(f"Using default intervals: Report={reporting_interval}s, Retry={retry_interval}s, MaxRetryDuration={max_retry_duration.total_seconds()}s")
 
     first_failed_attempt_time = None
     last_known_hostname = None
@@ -110,37 +125,37 @@ if __name__ == '__main__':
         current_ip = get_ip_address()
 
         if not current_hostname or not current_ip:
-            print(f"{datetime.now()} - Could not get hostname or IP. Retrying in {retry_interval} seconds.")
+            logger.warning(f"Could not get hostname or IP. Retrying in {retry_interval} seconds.")
             time.sleep(retry_interval)
             continue
 
-        # Check if data has changed since last successful report or last attempt
         data_changed = (current_hostname != last_known_hostname) or (current_ip != last_known_ip)
         if data_changed:
-            print(f"{datetime.now()} - Data changed. New Hostname: {current_hostname}, New IP: {current_ip}. Resetting retry state.")
-            first_failed_attempt_time = None # Reset retry window if data is new
+            logger.info(f"Data changed. New Hostname: {current_hostname}, New IP: {current_ip}. Resetting retry state.")
+            first_failed_attempt_time = None
             last_known_hostname = current_hostname
             last_known_ip = current_ip
 
         success = send_data(config, current_hostname, current_ip)
 
         if success:
-            print(f"{datetime.now()} - Reporting successful. Next report in {reporting_interval} seconds.")
-            first_failed_attempt_time = None # Reset on success
+            logger.info(f"Reporting successful. Next report in {reporting_interval} seconds.")
+            first_failed_attempt_time = None
             time.sleep(reporting_interval)
         else:
-            print(f"{datetime.now()} - Reporting failed.")
+            logger.warning("Reporting failed.")
             if first_failed_attempt_time is None:
                 first_failed_attempt_time = datetime.now()
-                print(f"{datetime.now()} - This is the first failure for this data. Starting retry window.")
+                logger.info("This is the first failure for this data. Starting retry window.")
 
-            if datetime.now() - first_failed_attempt_time > max_retry_duration:
-                print(f"{datetime.now()} - Maximum retry duration ({max_retry_duration.total_seconds()}s) exceeded for {last_known_hostname}/{last_known_ip}. Giving up on this data point.")
-                print(f"{datetime.now()} - Will fetch fresh data and attempt reporting again in {reporting_interval} seconds.")
-                first_failed_attempt_time = None # Reset retry state
-                last_known_hostname = None # Force data refresh
+            elapsed_retry_time = datetime.now() - first_failed_attempt_time
+            if elapsed_retry_time > max_retry_duration:
+                logger.error(f"Maximum retry duration ({max_retry_duration.total_seconds()}s) exceeded for {last_known_hostname}/{last_known_ip}. Giving up on this data point.")
+                logger.info(f"Will fetch fresh data and attempt reporting again in {reporting_interval} seconds.")
+                first_failed_attempt_time = None
+                last_known_hostname = None
                 last_known_ip = None
-                time.sleep(reporting_interval) # Sleep for the main reporting interval before fetching fresh data
+                time.sleep(reporting_interval)
             else:
-                print(f"{datetime.now()} - Will retry in {retry_interval} seconds.")
+                logger.warning(f"Will retry in {retry_interval} seconds. Elapsed retry time: {elapsed_retry_time.total_seconds():.0f}s / {max_retry_duration.total_seconds()}s")
                 time.sleep(retry_interval)

@@ -135,12 +135,21 @@ The client application reports its IP and hostname to the master server.
         # Check the status of the service
         sudo systemctl status ip_reporter_client.service
 
-        # View live logs
+            # View live logs (follow mode)
         sudo journalctl -u ip_reporter_client.service -f
 
         # View all logs for the service
         sudo journalctl -u ip_reporter_client.service
         ```
+            The client application uses Python's built-in logging. Timestamps and log levels are part of the log messages. Journald captures these logs, and they will typically look like this (the `ip-reporter-client[PID]` part is added by systemd/journald):
+            ```
+            -- Logs begin at ... --
+            May 31 18:00:00 yourclienthostname ip-reporter-client[12345]: 2025-05-31 18:00:00,123 - ip_reporter_client - INFO - Starting IP Reporter Client...
+            May 31 18:00:00 yourclienthostname ip-reporter-client[12345]: 2025-05-31 18:00:00,125 - ip_reporter_client - INFO - Loading configuration from /path/to/ip_reporter/client/client_config.ini
+            May 31 18:00:01 yourclienthostname ip-reporter-client[12345]: 2025-05-31 18:00:01,300 - ip_reporter_client - INFO - Attempting to report IP: 192.168.1.10 for hostname: yourclient to http://masterhost:5000/report_ip
+            May 31 18:00:01 yourclienthostname ip-reporter-client[12345]: 2025-05-31 18:00:01,500 - ip_reporter_client - INFO - Successfully reported. Server response: {'status': 'success', 'message': 'IP reported'}
+            May 31 18:00:01 yourclienthostname ip-reporter-client[12345]: 2025-05-31 18:00:01,502 - ip_reporter_client - INFO - Reporting successful. Next report in 1800 seconds.
+            ```
 
 ## Troubleshooting
 
