@@ -1,5 +1,7 @@
 # SystemPulse
 
+<img src="image.png" alt="Alt Text" style="width: 55%; height: 55%;" />
+
 This project helps track the IP addresses of remote systems. A client application runs on remote systems and reports their IP address and hostname to a master server. The master server collects this information and displays it on a simple web UI.
 
 ## Features
