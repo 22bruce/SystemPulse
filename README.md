@@ -176,4 +176,3 @@ The client application reports its IP and hostname to the master server.
     *   **Path Errors:** Most common issue. Double-check `ExecStart=` and `WorkingDirectory=` paths in your `.service` file. They must be absolute and correct.
     *   **Permissions:** Ensure the user running the service (root or a dedicated user) has execute permissions for `client_app.py` and the Python interpreter, and read access to all necessary files.
     *   **Python Environment:** If you installed dependencies into a virtual environment, ensure `ExecStart` points to the python executable *inside* that venv.
-```
